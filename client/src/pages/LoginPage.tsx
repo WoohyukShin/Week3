@@ -13,21 +13,6 @@ const LoginPage = () => {
   const navigate = useNavigate();
   const { login } = useAuth();
 
-  // before backend
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    // Mock login logic
-    if (isLogin) {
-      login('mock_token', username);
-      navigate('/');
-    } else {
-      // Mock registration logic
-      setIsLogin(true);
-      alert('Registration successful! Please log in.');
-    }
-  };
-  /*
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -41,11 +26,10 @@ const LoginPage = () => {
         setIsLogin(true); 
         alert('Registration successful! Please log in.');
       }
-    } catch (err: any) => {
+    } catch (err: any) {
       setError(err.response?.data?.message || 'An error occurred');
     }
   };
-  */
 
   return (
     <div style={{ color: 'white', textAlign: 'center', paddingTop: '100px' }}>

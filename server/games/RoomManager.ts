@@ -1,13 +1,17 @@
-// server/games/RoomManager.js
-const Room = require('./Room');
+import Room from './Room';
+import Player from './player';
+import { Server } from 'socket.io';
 
-class RoomManager {
-  constructor(io) {
+export class RoomManager {
+  io: Server;
+  rooms: Map<string, Room>; // Map<roomId, Room>
+
+  constructor(io: Server) {
     this.io = io;
-    this.rooms = new Map(); // Map<roomId, Room>
+    this.rooms = new Map();
   }
 
-  createRoom(hostPlayer) {
+  createRoom(hostPlayer: Player): Room {
     const roomId = this.generateRoomId();
     const room = new Room(roomId, hostPlayer, this);
     this.rooms.set(roomId, room);
@@ -15,7 +19,7 @@ class RoomManager {
     return room;
   }
 
-  joinRoom(roomId, player) {
+  joinRoom(roomId: string, player: Player): Room {
     const room = this.rooms.get(roomId);
     if (!room) {
       throw new Error('Room not found.');
@@ -32,7 +36,7 @@ class RoomManager {
     return room;
   }
 
-  leaveRoom(roomId, socketId) {
+  leaveRoom(roomId: string, socketId: string): void {
     const room = this.rooms.get(roomId);
     if (room) {
       room.removePlayer(socketId);
@@ -48,23 +52,24 @@ class RoomManager {
     }
   }
 
-  getRoom(roomId) {
+  getRoom(roomId: string): Room | undefined {
     return this.rooms.get(roomId);
   }
 
   // 간단한 랜덤 ID 생성기
-  generateRoomId() {
+  generateRoomId(): string {
     return Math.random().toString(36).substring(2, 8).toUpperCase();
   }
 }
 
 // RoomManager를 싱글톤으로 만들기 위해 인스턴스를 내보냅니다.
-// 실제 io 객체는 server/index.js에서 주입됩니다.
-let instance = null;
+let instance: RoomManager | null = null;
 
-module.exports = (io) => {
+const getRoomManager = (io: Server): RoomManager => {
   if (!instance) {
     instance = new RoomManager(io);
   }
   return instance;
 };
+
+export default getRoomManager;
