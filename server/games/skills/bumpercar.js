@@ -1,6 +1,7 @@
-const Skill = require('../skills');
+// server/games/skills/bumpercar.js
+const Skill = require('../Skill');
 
-class bumpercar extends skills {
+class bumpercar extends Skill {
   constructor(owner) {
     super(owner);
     this.name = '노래';

@@ -10,6 +10,8 @@ class Game {
     
     this.gameInterval = null; // 게임 루프의 setInterval ID
     this.isManagerAppeared = false; // '운영진' 등장 여부
+
+    this.roomManager = roomManager; //룸 관리
   }
 
   // 게임 시작
@@ -106,6 +108,11 @@ class Game {
     clearInterval(this.gameInterval);
     this.broadcast('gameEnded', { winner: winner ? winner.getInfo() : null });
     // TODO: RoomManager를 통해 Room 정리 로직 호출
+
+if (this.roomManager) {
+    this.roomManager.rooms.delete(this.roomId);
+    console.log(`[${this.roomId}] Room deleted after game ended`);
+  }
   }
 
   // 플레이어 액션 처리 (socket handler에서 호출)
@@ -125,6 +132,14 @@ class Game {
         break;
       case 'useSkill':
         // player.skill.execute(...)
+        if (player.skill && player.skill.canUse()) {
+        player.skill.execute(this.players);
+        player.skill.onUse();
+        this.broadcast('skillUsed', {
+          socketId: player.socketId,
+          skill: player.skill.name,
+        });
+      }
         break;
     }
   }

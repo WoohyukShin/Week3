@@ -14,6 +14,8 @@ class Player {
     this.commitCount = 0;     // 성공한 commit 횟수
 
     this.skill = null;        // 보유 스킬
+    this.muscleGauge = 0; // 근육량: 운동 스킬에 사용됨
+
   }
 
   // 플레이어의 상태를 업데이트하는 메소드들
@@ -30,6 +32,7 @@ class Player {
       flowGauge: this.flowGauge,
       commitCount: this.commitCount,
       skill: this.skill ? this.skill.name : null, // 스킬 이름만 전송
+      muscleGauge: this.muscleGauge,
     };
   }
 }

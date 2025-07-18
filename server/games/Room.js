@@ -3,11 +3,12 @@ const { MAX_PLAYERS_PER_ROOM } = require('../constants/constants');
 const Game = require('./game');
 
 class Room {
-  constructor(roomId, hostPlayer) {
+  constructor(roomId, hostPlayer, roomManager) {
     this.roomId = roomId;
     this.players = new Map(); // Map<socketId, Player>
     this.hostId = hostPlayer.socketId;
     this.game = null; // 게임이 시작되면 Game 인스턴스가 할당됩니다.
+    this.roomManager = roomManager;
 
     this.addPlayer(hostPlayer);
   }
@@ -46,7 +47,7 @@ class Room {
       return;
     }
     console.log(`Starting game in room ${this.roomId}`);
-    this.game = new Game(this.roomId, Array.from(this.players.values()), io);
+    this.game = new Game(this.roomId, Array.from(this.players.values()), io, this.roomManager);
     this.game.start();
   }
 

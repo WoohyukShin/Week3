@@ -9,7 +9,7 @@ class RoomManager {
 
   createRoom(hostPlayer) {
     const roomId = this.generateRoomId();
-    const room = new Room(roomId, hostPlayer);
+    const room = new Room(roomId, hostPlayer, this);
     this.rooms.set(roomId, room);
     console.log(`Room created: ${roomId} by ${hostPlayer.username}`);
     return room;
