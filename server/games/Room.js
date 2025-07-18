@@ -52,7 +52,7 @@ class Room {
   }
 
   // 방의 모든 플레이어에게 메시지를 전송
-  broadcast(event, data) {
+  broadcast(event, data) { // not used?
     this.players.forEach(player => {
       // io.to(player.socketId).emit(event, data);
       // 실제 emit은 RoomManager나 핸들러에서 io 객체를 받아 처리합니다.

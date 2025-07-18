@@ -10,7 +10,7 @@ class coffee extends Skill {
   }
 
   execute() {
-    this.owner.isFlowProtected = true;
+    this.owner.
     setTimeout(() => {
       this.owner.isFlowProtected = false;
     }, 5000);

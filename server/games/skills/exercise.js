@@ -5,16 +5,13 @@ class exercise extends Skill {
   constructor(owner) {
     super(owner);
     this.name = '운동';
-    this.description = '근육량 10 증가. 100 이상이면 승리!';
+    this.description = '운동을 시작함. 3초 동안 운동에 성공하면 근육량이 오름. 근육량이 꽉 차면 게임을 승리함.';
     this.cooldown = 3;
   }
 
   execute() {
-    this.owner.muscleGauge = (this.owner.muscleGauge || 0) + 10;
-    if (this.owner.muscleGauge >= 100) {
-      this.owner.game.endGame(this.owner);
-    }
     this.onUse();
+    this.owner.isExercising = true;
   }
 }
 

@@ -12,7 +12,7 @@ const GAME_CONSTANTS = {
   
   INITIAL_FLOW_GAUGE: 100,
   MAX_FLOW_GAUGE: 100,
-  FLOW_GAUGE_DECREASE_PER_TICK: 2, // 초당 몰입 게이지 감소량
+  FLOW_GAUGE_DECREASE_PER_TICK: 10, // 초당 몰입 게이지 감소량
   FLOW_GAUGE_INCREASE_PER_TICK: 5, // 춤 출 때 초당 몰입 게이지 증가량
   
   // 몰입 게이지가 이 값 이하일 때 commit 속도 절반

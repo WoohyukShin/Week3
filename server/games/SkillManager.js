@@ -8,11 +8,9 @@ class SkillManager {
     this.loadSkills();
   }
 
-  // 'games/skills' 디렉토리에서 모든 스킬 파일을 동적으로 로드합니다.
   loadSkills() {
     const skillsDir = path.join(__dirname, 'skills');
     
-    // skills 디렉토리가 없으면 생성
     if (!fs.existsSync(skillsDir)) {
         fs.mkdirSync(skillsDir);
     }
@@ -33,9 +31,9 @@ class SkillManager {
   }
 
   /**
-   * 플레이어에게 랜덤 스킬을 생성하여 부여합니다.
-   * @param {Player} player - 스킬을 받을 플레이어
-   * @returns {Skill|null} - 생성된 스킬 인스턴스 또는 null
+     플레이어에게 랜덤 스킬을 생성하여 부여합니다.
+     @param {Player} player - 스킬을 받을 플레이어
+     @returns {Skill|null}
    */
   assignRandomSkill(player) {
     const skillNames = Array.from(this.skills.keys());
@@ -55,6 +53,5 @@ class SkillManager {
   }
 }
 
-// SkillManager는 싱글톤으로 사용합니다.
 const instance = new SkillManager();
 module.exports = instance;

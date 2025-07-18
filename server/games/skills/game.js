@@ -13,11 +13,12 @@ class game extends Skill {
 
   execute() {
     if (this.usesLeft <= 0) return;
+    this.owner.playingGame = true;
 
-    this.owner.flowGauge = Math.min(
-      GAME_CONSTANTS.MAX_FLOW_GAUGE,
-      this.owner.flowGauge + 30
-    );
+    setTimeout(() => {
+      this.owner.playingGame = false;
+    }, 2000);
+
     this.usesLeft--;
     this.onUse();
   }

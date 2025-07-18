@@ -12,25 +12,9 @@ class shotgun extends skills {
 
   execute(allPlayers) {
     if (this.usesLeft <= 0) return;
-
-    const game = this.owner.game;
-    game.isManagerAppeared = true;
-
-    game.players.forEach(player => {
-      if (player.isDancing) {
-        if (player.hasShield) {
-          player.hasShield = false;
-        } else {
-          player.isAlive = false;
-          game.broadcast('playerDied', {
-            socketId: player.socketId,
-            reason: 'caught dancing',
-          });
-        }
-      }
+    this.owner.game.broadcast('Shotgun', {
+      socketId: player.socketId
     });
-
-    game.broadcast('managerAppeared', {});
     this.usesLeft--;
     this.onUse();
   }
