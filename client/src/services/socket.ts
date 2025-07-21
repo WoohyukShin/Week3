@@ -1,10 +1,10 @@
 import { io, Socket } from 'socket.io-client';
 
 // 환경에 따른 소켓 URL 설정
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 
-  (process.env.NODE_ENV === 'production'
-    ? 'https://your-backend-domain.railway.app' // 실제 백엔드 도메인으로 변경
-    : 'http://localhost:3001');
+// const SOCKET_URL = 'http://192.168.35.96:3001'; // 로컬 테스트용
+const SOCKET_URL = 'https://week3server-production.up.railway.app'; // Railway 배포용
+// const SOCKET_URL = 'http://localhost:3001';
+
 
 class SocketService {
   public socket: Socket | null = null;

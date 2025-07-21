@@ -12,12 +12,24 @@ export class RoomManager {
   }
 
   createRoom(hostPlayer: Player): Room {
-    const roomId = this.generateRoomId();
-    const room = new Room(roomId, hostPlayer, this);
-    this.rooms.set(roomId, room);
-    console.log(`Room created: ${roomId} by ${hostPlayer.username}`);
-    return room;
-  }
+  const roomId = this.generateRoomId();
+  const room = new Room(roomId, hostPlayer, this);
+  this.rooms.set(roomId, room);
+  console.log(`Room created: ${roomId} by ${hostPlayer.username}`);
+  
+  this.broadcastRoomList();
+  return room;
+}
+
+
+  broadcastRoomList() {
+  const roomList = Array.from(this.rooms.entries()).map(([roomId, room]) => ({
+    roomId,
+    roomName: room.getState().players[0]?.username || '이름 없음',
+    host: room.getState().hostId,
+  }));
+  this.io.emit('roomList', roomList); // 모든 클라이언트에 전송
+}
 
   joinRoom(roomId: string, player: Player): Room {
     const room = this.rooms.get(roomId);
@@ -28,11 +40,7 @@ export class RoomManager {
     
     // 방에 있는 모든 사람에게 새로운 플레이어 정보 전파
     this.io.to(roomId).emit('playerJoined', room.getState());
-    
-    // 방이 꽉 찼으면 게임 시작
-    if (room.isFull()) {
-      room.startGame(this.io);
-    }
+
     return room;
   }
 
@@ -50,11 +58,20 @@ export class RoomManager {
         this.io.to(roomId).emit('playerLeft', room.getState());
       }
     }
+    this.broadcastRoomList();
   }
 
   getRoom(roomId: string): Room | undefined {
     return this.rooms.get(roomId);
   }
+
+  getRoomList() {
+  return Array.from(this.rooms.entries()).map(([roomId, room]) => ({
+    roomId,
+    roomName: room.getState().players[0]?.username || '이름 없음',
+    host: room.getState().hostId,
+  }));
+}
 
   // 간단한 랜덤 ID 생성기
   generateRoomId(): string {
@@ -62,7 +79,6 @@ export class RoomManager {
   }
 }
 
-// RoomManager를 싱글톤으로 만들기 위해 인스턴스를 내보냅니다.
 let instance: RoomManager | null = null;
 
 const getRoomManager = (io: Server): RoomManager => {

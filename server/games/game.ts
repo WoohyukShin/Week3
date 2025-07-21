@@ -2,6 +2,7 @@ import * as GAME_CONSTANTS from '../constants/constants';
 import Player, { PlayerInfo } from './player';
 import { RoomManager } from './RoomManager';
 import { Server } from 'socket.io';
+import SkillManager from './SkillManager';
 
 export interface GameState {
   roomId: string;
@@ -9,7 +10,7 @@ export interface GameState {
   isManagerAppeared: boolean;
 }
 
-type PlayerAction = 'startDancing' | 'stopDancing' | 'push';
+type PlayerAction = 'startDancing' | 'stopDancing' | 'move' | 'push';
 
 class Game {
   roomId: string;
@@ -29,11 +30,32 @@ class Game {
   }
 
   start(): void {
+    console.log(`🎮 Game.start() called for room: ${this.roomId}`);
+    this.players.forEach(player => {
+      // Skill 랜덤으로 할당하고 (지금은 범퍼카만) skillAssigned 이벤트 발생
+      const SkillClass = SkillManager.skills.get('bumpercar');
+      if (SkillClass) {
+        player.skill = new SkillClass(player);
+        this.io.to(player.socketId).emit('skillAssigned', { skill: 'bumpercar' });
+        console.log(`[DEBUG] game.ts.start : skillAssigned sent to ${player.username} (${player.socketId}): bumpercar`);
+      }
+    });
+    // skillReadySet 초기화
+    const room = this.roomManager.getRoom(this.roomId);
+    if (room) {
+      room.resetSkillReady();
+    }
     this.broadcast('gameStarted', this.getGameState());
+  }
+
+  // 모든 플레이어가 OK(ready) 누르면 진짜 게임 시작
+  startGameLoop(): void {
     this.gameInterval = setInterval(() => this.tick(), GAME_CONSTANTS.GAME_TICK_INTERVAL);
+    console.log(`⏰ Game interval started for room: ${this.roomId}, tick interval: ${GAME_CONSTANTS.GAME_TICK_INTERVAL}ms`);
   }
 
   tick(): void {
+    console.log(`🔄 Tick called for room: ${this.roomId}, isManagerAppeared: ${this.isManagerAppeared}`);
     this.handleManagerEvent();
     this.players.forEach(player => {
       if (!player.isAlive) return;
@@ -46,15 +68,19 @@ class Game {
   }
 
   handleManagerEvent(): void {
-    if (Math.random() < GAME_CONSTANTS.MANAGER_APPEARANCE_PROBABILITY && !this.isManagerAppeared) {
+    const randomValue = Math.random();
+    const shouldAppear = randomValue < GAME_CONSTANTS.MANAGER_APPEARANCE_PROBABILITY;
+    console.log(`🎲 Manager check: random=${randomValue.toFixed(3)}, threshold=${GAME_CONSTANTS.MANAGER_APPEARANCE_PROBABILITY}, shouldAppear=${shouldAppear}, isManagerAppeared=${this.isManagerAppeared}`);
+    
+    if (shouldAppear && !this.isManagerAppeared) {
       this.isManagerAppeared = true;
+      console.log('🚨 Manager appeared! Setting isManagerAppeared = true');
       this.broadcast('managerAppeared', {});
 
       setTimeout(() => {
+        console.log('⏰ Manager timeout - killing players and setting isManagerAppeared = false');
         this.killPlayers();
       }, GAME_CONSTANTS.MANAGER_KILL_DELAY_MS);
-    } else {
-      this.isManagerAppeared = false;
     }
   }
 
@@ -66,23 +92,31 @@ class Game {
       }
     });
     this.isManagerAppeared = false;
+    console.log('💀 Manager killed players and set isManagerAppeared = false');
   }
 
   updatePlayerGauges(player: Player): void {
     if (player.isDancing) {
+      const oldFlow = player.flowGauge;
       player.flowGauge = Math.min(GAME_CONSTANTS.MAX_FLOW_GAUGE, player.flowGauge + GAME_CONSTANTS.FLOW_GAUGE_INCREASE_PER_TICK);
+      console.log(`💃 [${player.username}] Dancing - Flow: ${oldFlow} → ${player.flowGauge} (+${GAME_CONSTANTS.FLOW_GAUGE_INCREASE_PER_TICK})`);
     } else {
+      const oldFlow = player.flowGauge;
       player.flowGauge = Math.max(0, player.flowGauge - GAME_CONSTANTS.FLOW_GAUGE_DECREASE_PER_TICK);
+      console.log(`😴 [${player.username}] Not dancing - Flow: ${oldFlow} → ${player.flowGauge} (-${GAME_CONSTANTS.FLOW_GAUGE_DECREASE_PER_TICK})`);
 
       let commitIncrease = GAME_CONSTANTS.COMMIT_GAUGE_PER_TICK;
       if (player.flowGauge < GAME_CONSTANTS.FLOW_GAUGE_PENALTY_THRESHOLD) {
         commitIncrease /= 2;
       }
+      const oldCommit = player.commitGauge;
       player.commitGauge += commitIncrease;
+      console.log(`📝 [${player.username}] Commit: ${oldCommit} → ${player.commitGauge} (+${commitIncrease})`);
 
       if (player.commitGauge >= GAME_CONSTANTS.MAX_COMMIT_GAUGE) {
         player.commitGauge = 0;
         player.commitCount++;
+        console.log(`🎉 [${player.username}] Commit success! Count: ${player.commitCount}`);
         this.broadcast('commitSuccess', { socketId: player.socketId, commitCount: player.commitCount });
       }
     }
@@ -144,16 +178,29 @@ class Game {
     }
   }
 
+  handleSkillUse(socketId: string): void {
+    const player = this.players.find(p => p.socketId === socketId);
+    if (player && player.skill) {
+      console.log(`[SKILL] ${player.username} uses skill: ${player.skill.name}`);
+      player.skill.execute(this.players);
+      // 여기에 broadcast 추가??
+    } else {
+      console.log(`[SKILL] Player ${socketId} tried to use skill, but has none.`);
+    }
+  }
+
   broadcast(event: string, data: any): void {
     this.io.to(this.roomId).emit(event, data);
   }
 
   getGameState(): GameState {
-    return {
+    const gameState = {
       roomId: this.roomId,
       players: this.players.map(p => p.getInfo()),
       isManagerAppeared: this.isManagerAppeared,
     };
+    console.log(`📊 Broadcasting GameState - isManagerAppeared: ${this.isManagerAppeared}, Players: ${this.players.length}`);
+    return gameState;
   }
 }
 

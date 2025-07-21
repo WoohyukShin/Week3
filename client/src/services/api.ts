@@ -2,18 +2,16 @@
 import axios from 'axios';
 import type { InternalAxiosRequestConfig } from 'axios';
 
-// 환경에 따른 API URL 설정
-const API_URL = import.meta.env.VITE_API_URL || 
-  (process.env.NODE_ENV === 'production' 
-    ? 'https://your-backend-domain.railway.app/api' // 실제 백엔드 도메인으로 변경
-    : 'http://localhost:3001/api');
+// API_URL - 프록시 사용
+// const API_URL = 'http://192.168.35.96:3001/api'; // 로컬 테스트용
+const API_URL = 'https://week3server-production.up.railway.app/api'; // Railway 배포용
 
 const api = axios.create({
   baseURL: API_URL,
   headers: {
     'Content-Type': 'application/json',
   },
-  withCredentials: true,
+  withCredentials: false, // CORS 문제 해결을 위해 false로 변경
 });
 
 // JWT 토큰을 헤더에 추가하는 인터셉터
@@ -40,5 +38,9 @@ api.interceptors.response.use(
 export const registerUser = (userData: any) => api.post('/users/register', userData);
 export const loginUser = (credentials: any) => api.post('/users/login', credentials);
 export const getRanking = () => api.get('/users/ranking');
+
+// 중복확인 API
+export const checkUsername = (username: string) => api.get(`/users/check-username/${username}`);
+export const checkNickname = (nickname: string) => api.get(`/users/check-nickname/${nickname}`);
 
 export default api;
