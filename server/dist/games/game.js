@@ -32,8 +32,12 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 const GAME_CONSTANTS = __importStar(require("../constants/constants"));
+const SkillManager_1 = __importDefault(require("./SkillManager"));
 class Game {
     constructor(roomId, players, io, roomManager) {
         this.roomId = roomId;
@@ -44,8 +48,23 @@ class Game {
         this.isManagerAppeared = false;
     }
     start() {
+        console.log(`🎮 Game.start() called for room: ${this.roomId}`);
+        this.players.forEach(player => {
+            // 랜덤 스킬 할당
+            const skillInstance = SkillManager_1.default.assignRandomSkill(player);
+            player.skill = skillInstance;
+            this.io.to(player.socketId).emit('skillAssigned', { skill: player.skill ? player.skill.name : null });
+            console.log(`[Game.start] skillAssigned sent to ${player.username} (${player.socketId}):`, player.skill ? player.skill.name : null);
+        });
+        const room = this.roomManager.getRoom(this.roomId);
+        if (room)
+            room.resetSkillReady();
         this.broadcast('gameStarted', this.getGameState());
+    }
+    startGameLoop() {
         this.gameInterval = setInterval(() => this.tick(), GAME_CONSTANTS.GAME_TICK_INTERVAL);
+        this.io.to(this.roomId).emit('startGameLoop');
+        console.log(`⏰ Game interval started for room: ${this.roomId}`);
     }
     tick() {
         this.handleManagerEvent();
@@ -58,43 +77,42 @@ class Game {
         this.broadcast('gameStateUpdate', this.getGameState());
         this.checkEndCondition();
     }
-    handleManagerEvent() {
-        if (Math.random() < GAME_CONSTANTS.MANAGER_APPEARANCE_PROBABILITY && !this.isManagerAppeared) {
+    handleManagerEvent(forceAppear = false) {
+        const randomValue = Math.random();
+        var shouldAppear = randomValue < GAME_CONSTANTS.MANAGER_APPEARANCE_PROBABILITY;
+        if (forceAppear) {
+            shouldAppear = true;
+            return;
+        }
+        if (shouldAppear && !this.isManagerAppeared) {
             this.isManagerAppeared = true;
             this.broadcast('managerAppeared', {});
-            setTimeout(() => {
-                this.killPlayers();
-            }, GAME_CONSTANTS.MANAGER_KILL_DELAY_MS);
-        }
-        else {
-            this.isManagerAppeared = false;
+            setTimeout(() => this.killPlayers(), GAME_CONSTANTS.MANAGER_KILL_DELAY_MS);
         }
     }
     killPlayers() {
         this.players.forEach(player => {
-            if (player.isDancing) {
+            if (player.playerMotion == 'dancing' || player.playerMotion == 'exercise' || player.playerMotion == 'bumpercar') {
                 player.isAlive = false;
-                this.broadcast('playerDied', { socketId: player.socketId, reason: 'dancing' });
+                this.broadcast('playerDied', { socketId: player.socketId, reason: 'Manager' });
             }
         });
         this.isManagerAppeared = false;
     }
     updatePlayerGauges(player) {
-        if (player.isDancing) {
-            player.flowGauge = Math.min(GAME_CONSTANTS.MAX_FLOW_GAUGE, player.flowGauge + GAME_CONSTANTS.FLOW_GAUGE_INCREASE_PER_TICK);
+        if (player.playerMotion === 'dancing') { // dancing일 때 몰입 게이지 증가
+            player.flowGauge = Math.min(GAME_CONSTANTS.MAX_FLOW_GAUGE, player.flowGauge +
+                GAME_CONSTANTS.FLOW_GAUGE_INCREASE_PER_TICK);
+        }
+        else if (player.playerMotion === 'gaming') { // gaming일 때 몰입 게이지 덜 증가
+            player.flowGauge = Math.min(GAME_CONSTANTS.MAX_FLOW_GAUGE, player.flowGauge +
+                GAME_CONSTANTS.FLOW_GAUGE_INCREASE_PER_TICK * GAME_CONSTANTS.GAME_FLOW_GAUGE_RATE);
+        }
+        else if (player.isFlowProtected || player.playerMotion !== 'coding') {
+            return; // 커피 버프 중 or 운동, 노래 부를 때는 몰입 게이지 변화 없음
         }
         else {
             player.flowGauge = Math.max(0, player.flowGauge - GAME_CONSTANTS.FLOW_GAUGE_DECREASE_PER_TICK);
-            let commitIncrease = GAME_CONSTANTS.COMMIT_GAUGE_PER_TICK;
-            if (player.flowGauge < GAME_CONSTANTS.FLOW_GAUGE_PENALTY_THRESHOLD) {
-                commitIncrease /= 2;
-            }
-            player.commitGauge += commitIncrease;
-            if (player.commitGauge >= GAME_CONSTANTS.MAX_COMMIT_GAUGE) {
-                player.commitGauge = 0;
-                player.commitCount++;
-                this.broadcast('commitSuccess', { socketId: player.socketId, commitCount: player.commitCount });
-            }
         }
     }
     checkPlayerStatus(player) {
@@ -105,15 +123,25 @@ class Game {
     }
     checkEndCondition() {
         const alivePlayers = this.players.filter(p => p.isAlive);
-        if (alivePlayers.length <= 1) {
-            this.endGame(alivePlayers.length === 1 ? alivePlayers[0] : null);
-        }
+        if (alivePlayers.length <= 1)
+            this.endGame(alivePlayers[0] || null);
     }
     endGame(winner) {
-        if (this.gameInterval) {
+        if (this.gameInterval)
             clearInterval(this.gameInterval);
-        }
-        this.broadcast('gameEnded', { winner: winner ? winner.getInfo() : null });
+        const endTime = Date.now();
+        const room = this.roomManager.getRoom(this.roomId);
+        const totalTimeMs = endTime - (room?.startTime ?? endTime);
+        const formattedTime = `${Math.floor(totalTimeMs / 60000).toString().padStart(2, '0')}:${Math.floor((totalTimeMs % 60000) / 1000).toString().padStart(2, '0')}`;
+        this.players.forEach((player) => {
+            const resultData = {
+                winnerSocketId: winner?.socketId ?? '',
+                skill: player.skill?.name || '',
+                time: formattedTime,
+            };
+            this.io.to(player.socketId).emit('gameEnded', resultData);
+            console.log(`[Game.endGame] Sent gameEnded to ${player.username}`, resultData);
+        });
         if (this.roomManager) {
             this.roomManager.rooms.delete(this.roomId);
             console.log(`[${this.roomId}] Room deleted after game ended`);
@@ -125,27 +153,44 @@ class Game {
             return;
         switch (action) {
             case 'startDancing':
-                player.isDancing = true;
+                player.playerMotion = 'dancing';
                 break;
             case 'stopDancing':
-                player.isDancing = false;
+                player.playerMotion = 'coding';
                 break;
-            case 'push':
-                this.broadcast('pushStarted', { socketId: player.socketId });
-                setTimeout(() => {
-                    this.handlePush(player);
-                }, GAME_CONSTANTS.PUSH_ANIMATION_DURATION_MS);
-                break;
+            // push 관련 case 삭제
         }
     }
-    handlePush(player) {
-        const successRate = player.commitCount * GAME_CONSTANTS.PUSH_SUCCESS_BASE_RATE;
-        if (Math.random() < successRate) {
-            this.endGame(player);
+    /*
+    handlePush(player: Player): void {
+      const successRate = player.commitCount * GAME_CONSTANTS.PUSH_SUCCESS_BASE_RATE;
+      if (Math.random() < successRate) {
+        this.endGame(player);
+      } else {
+        player.commitCount = 0;
+        this.broadcast('pushFailed', { socketId: player.socketId });
+      }
+    }
+  */
+    handleSkillUse(socketId) {
+        const player = this.players.find(p => p.socketId === socketId);
+        if (player && player.skill) {
+            player.skill.execute(this.players);
         }
-        else {
-            player.commitCount = 0;
-            this.broadcast('pushFailed', { socketId: player.socketId });
+    }
+    // animationComplete 이벤트 처리
+    handleAnimationComplete(socketId, type) {
+        console.log("[DEBUG] Game.ts : handleAnimationComplete : ", type);
+        const player = this.players.find(p => p.socketId === socketId);
+        if (!player)
+            return;
+        if (type === 'coffee') {
+            player.playerMotion = 'coding';
+        }
+        else if (type === 'shotgun') {
+            player.playerMotion = 'coding';
+            this.isManagerAppeared = true;
+            this.broadcast('managerAppeared', {});
         }
     }
     broadcast(event, data) {

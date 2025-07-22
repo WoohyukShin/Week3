@@ -20,15 +20,13 @@ const LobbyPage = () => {
   const { username, logout } = useAuth();
 
   useEffect(() => {
-    socketService.connect();
-
     socketService.on('connect', () => setError(''));
     socketService.on('connect_error', () => setError('서버 연결에 실패했습니다.'));
 
-    socketService.on('roomCreated', (room) => navigate(`/room/${room.roomId}`));
-    socketService.on('joinedRoom', (room) => navigate(`/room/${room.roomId}`));
-    socketService.on('roomList', (roomList) => setRooms(roomList));
-    socketService.on('error', (error) => {
+    socketService.on('roomCreated', (room: any) => navigate(`/room/${room.roomId}`));
+    socketService.on('joinedRoom', (room: any) => navigate(`/room/${room.roomId}`));
+    socketService.on('roomList', (roomList: any) => setRooms(roomList));
+    socketService.on('error', (error: any) => {
       setError(error.message || '알 수 없는 오류가 발생했습니다.');
       setIsLoading(false);
     });

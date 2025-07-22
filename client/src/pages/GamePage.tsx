@@ -1,26 +1,39 @@
 // src/pages/GamePage.tsx
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import Phaser from 'phaser';
 import GameScene from '../phaser/scenes/GameScene.ts';
 import ModalTab from '../components/ModalTab';
 import { SKILL_INFO } from '../constants/skills';
+import ResultModal from '../components/ResultModal';
 import socketService from '../services/socket';
 import './GamePage.css';
 
-const gameWidth = 800;
-const gameHeight = 600;
+const gameWidth = 1200;
+const gameHeight = 800;
+
+// GamePage.tsx 상단 생략...
 
 const GamePage = () => {
   const gameContainer = useRef<HTMLDivElement>(null);
   const gameInstance = useRef<Phaser.Game | null>(null);
   const navigate = useNavigate();
+  const location = useLocation();
 
+  const initialTotalCount = location.state?.totalCount || 0;
   const [showSkillModal, setShowSkillModal] = useState(false);
   const [skillName, setSkillName] = useState<string | null>(null);
   const [readyCount, setReadyCount] = useState(0);
-  const [totalCount, setTotalCount] = useState(0);
+  const [totalCount, setTotalCount] = useState(initialTotalCount);
   const [okClicked, setOkClicked] = useState(false);
+
+  const [result, setResult] = useState<'win' | 'lose' | null>(null);
+  const [commitCount, setCommitCount] = useState(0);
+  const [skillUsed, setSkillUsed] = useState('');
+  const [gameTime, setGameTime] = useState('00:00');
+  const [showResultModal, setShowResultModal] = useState(false);
+  const [gameStateArrived, setGameStateArrived] = useState(false);
+  const gameStartedRef = useRef(false);
 
   useEffect(() => {
     if (gameContainer.current && !gameInstance.current) {
@@ -41,10 +54,20 @@ const GamePage = () => {
       gameInstance.current = new Phaser.Game(config);
     }
 
-    // 게임 종료 시 로비로 이동
-    const handleGameEnded = (data: any) => {
-      console.log('👋 게임 종료!', data);
-      navigate('/lobby');
+    const handleGameEnded = (data: {
+      winnerSocketId: string;
+      commitCount: number;
+      skill: string;
+      time: string;
+    }) => {
+      console.log('[gameEnded received]', data);
+      const isWinner = data.winnerSocketId === socketService.socket?.id;
+      console.log('[~ isWinner]', isWinner);
+      setResult(isWinner ? 'win' : 'lose');
+      setCommitCount(data.commitCount);
+      setSkillUsed(data.skill);
+      setGameTime(data.time);
+      setShowResultModal(true);
     };
 
     socketService.on('gameEnded', handleGameEnded);
@@ -52,40 +75,45 @@ const GamePage = () => {
     return () => {
       gameInstance.current?.destroy(true);
       gameInstance.current = null;
-      socketService.off('gameEnded');
+      socketService.off('gameEnded', handleGameEnded);
     };
   }, [navigate]);
 
-  // 소켓 연결 및 skill/ready 이벤트 처리
   useEffect(() => {
-    console.log('[DEBUG] GamePage_tsx.useEffect : connecting socket...');
-    socketService.on('skillAssigned', ({ skill }) => {
-      console.log('[DEBUG] GamePage_tsx : skillAssigned:', skill);
+    console.log('[result changed]', result);
+  }, [result]);
+
+  useEffect(() => {
+    socketService.emit('getGameState', {});
+  }, []);
+
+  useEffect(() => {
+    const handleSkillAssigned = ({ skill }: any) => {
       setSkillName(skill);
       setShowSkillModal(true);
       setOkClicked(false);
-    });
-    socketService.on('skillReadyCount', ({ ready, total }) => {
-      console.log('[DEBUG] GamePage_tsx : skillReadyCount:', ready, total);
+    };
+    const handleSkillReadyCount = ({ ready, total }: any) => {
       setReadyCount(ready);
       setTotalCount(total);
-    });
-    socketService.on('allSkillReady', () => {
-      console.log('[DEBUG] GamePage_tsx : allSkillReady');
+    };
+    const handleAllSkillReady = () => {
       setShowSkillModal(false);
-    });
+    };
+    socketService.registerSkillAssignedHandler(handleSkillAssigned);
+    socketService.registerSkillReadyCountHandler(handleSkillReadyCount);
+    socketService.registerAllSkillReadyHandler(handleAllSkillReady);
     return () => {
-      socketService.off('skillAssigned');
-      socketService.off('skillReadyCount');
-      socketService.off('allSkillReady');
+      socketService.unregisterSkillAssignedHandler(handleSkillAssigned);
+      socketService.unregisterSkillReadyCountHandler(handleSkillReadyCount);
+      socketService.unregisterAllSkillReadyHandler(handleAllSkillReady);
     };
   }, []);
 
   useEffect(() => {
-    console.log('[DEBUG] GamePage_tsx.useEffect : showSkillModal:', showSkillModal, 'skillName:', skillName);
-  }, [showSkillModal, skillName]);
+    socketService.emit('gameReady', {});
+  }, []);
 
-  // OK 버튼 클릭
   const handleOk = () => {
     if (!okClicked) {
       socketService.emit('skillReady', {});
@@ -93,13 +121,51 @@ const GamePage = () => {
     }
   };
 
-  // 스킬 정보
-  const skillInfo = skillName && (SKILL_INFO as any)[skillName as keyof typeof SKILL_INFO] ?
-    (SKILL_INFO as any)[skillName as keyof typeof SKILL_INFO] : null;
+  const skillInfo =
+    skillName && (SKILL_INFO as any)[skillName as keyof typeof SKILL_INFO]
+      ? (SKILL_INFO as any)[skillName as keyof typeof SKILL_INFO]
+      : null;
+
+  useEffect(() => {
+    // 실제 게임 프레임이 돌기 시작한 뒤에만 bgm play
+    if (!showSkillModal && gameStateArrived && gameInstance.current && !gameStartedRef.current) {
+      try {
+        const scene = (gameInstance.current.scene.scenes[0] as any);
+        if (scene?.bgmAudio && scene.bgmAudio.paused) {
+          scene.bgmAudio.currentTime = 0;
+          scene.bgmAudio.play().catch(() => {});
+          gameStartedRef.current = true;
+        }
+      } catch (e) {}
+    }
+  }, [showSkillModal, gameStateArrived]);
+
+  useEffect(() => {
+    // 게임 종료 창이 뜨는 순간 → bgm 정지
+    if (showResultModal && gameInstance.current) {
+      try {
+        const scene = (gameInstance.current.scene.scenes[0] as any);
+        if (scene?.bgmAudio && !scene.bgmAudio.paused) {
+          scene.bgmAudio.pause();
+          scene.bgmAudio.currentTime = 0;
+        }
+      } catch (e) {}
+    }
+  }, [showResultModal]);
+
+  // gameStateUpdate가 오면 setGameStateArrived(true)
+  useEffect(() => {
+    const handleGameStateUpdate = () => {
+      setGameStateArrived(true);
+    };
+    socketService.on('gameStateUpdate', handleGameStateUpdate);
+    return () => {
+      socketService.off('gameStateUpdate', handleGameStateUpdate);
+    };
+  }, []);
 
   return (
-    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-      <div ref={gameContainer} />
+    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', position: 'relative' }}>
       <ModalTab
         visible={showSkillModal}
         title={skillInfo?.name || ''}
@@ -108,6 +174,35 @@ const GamePage = () => {
         okText="OK"
         onOk={handleOk}
         countText={`${readyCount} / ${totalCount}`}
+        skillName={skillName || undefined}
+        style={{
+          position: 'fixed',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          width: 400,
+          zIndex: 10,
+          pointerEvents: 'auto',
+        }}
+      />
+      <div ref={gameContainer} style={{ width: gameWidth, height: gameHeight }} />
+      
+      <ResultModal
+        visible={showResultModal}
+        result={result || 'lose'}
+        commitCount={commitCount}
+        skillName={skillUsed}
+        timeTaken={gameTime}
+        onExit={() => {
+          try {
+            (gameInstance.current?.scene.scenes[0] as any)?.shutdown?.();
+          } catch (e) {}
+          try {
+            gameInstance.current?.destroy(true);
+          } catch (e) {}
+          gameInstance.current = null;
+          navigate('/lobby');
+        }}
       />
     </div>
   );

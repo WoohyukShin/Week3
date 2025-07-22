@@ -29,16 +29,12 @@ const RoomPage = () => {
       return;
     }
 
-    if (!socketService.socket?.connected) {
-      socketService.connect();
-    }
-
-    socketService.on('roomState', (newRoomState: RoomState) => {
+    socketService.on('roomState', (newRoomState: any) => {
       setRoomState(newRoomState);
       setIsLoading(false);
     });
 
-    socketService.on('playerJoined', (newRoomState: RoomState) => {
+    socketService.on('playerJoined', (newRoomState: any) => {
       setRoomState(newRoomState);
     });
 
@@ -47,10 +43,16 @@ const RoomPage = () => {
     });
 
     socketService.on('gameStarted', () => {
-      navigate(`/game/${roomId}`);
+      // 기존: navigate(`/game/${roomId}`);
+      // 이제는 gameStart 이벤트에서만 이동
     });
 
-    socketService.on('error', (error) => {
+    socketService.on('gameStart', () => {
+      // totalCount를 함께 넘김
+      navigate(`/game/${roomId}`, { state: { totalCount: roomState?.players.length || 0 } });
+    });
+
+    socketService.on('error', (error: any) => {
       setError(error.message || '방에서 오류가 발생했습니다.');
     });
 
@@ -61,14 +63,14 @@ const RoomPage = () => {
       socketService.off('playerJoined');
       socketService.off('playerLeft');
       socketService.off('gameStarted');
+      socketService.off('gameStart');
       socketService.off('error');
     };
   }, [roomId, navigate]);
 
   const handleStartGame = () => {
-    if (roomState && roomState.hostId === socketService.socket?.id && !roomState.isGameStarted) {
-      socketService.emit('startGame', {});
-    }
+    socketService.emit('startGame', {});
+    // navigate(`/game/${roomId}`); // 제거
   };
 
   const handleLeaveRoom = () => {

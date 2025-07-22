@@ -1,7 +1,6 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
   define: {
@@ -12,32 +11,22 @@ export default defineConfig({
     sourcemap: true,
   },
   server: {
-    host: true, // 네트워크에서 접근 가능하게 함
+    port: 5173,
+    host: true,
     proxy: {
-      // 로컬 개발용
       '/api': {
-        target: 'http://localhost:3001',
+        target: 'https://week3server-production.up.railway.app',
         changeOrigin: true,
-        secure: false,
-      },
-      '/socket.io': {
-        target: 'http://localhost:3001',
-        ws: true,
-        changeOrigin: true,
-        secure: false,
-      },
-      // Railway 배포 서버용 (필요시 주석 해제)
-      // '/api': {
-      //   target: 'https://week3server-production.up.railway.app',
-      //   changeOrigin: true,
-      //   secure: false,
-      // },
-      // '/socket.io': {
-      //   target: 'https://week3server-production.up.railway.app',
-      //   ws: true,
-      //   changeOrigin: true,
-      //   secure: false,
-      // },
-    },
+        secure: true,
+        configure: (proxy, options) => {
+          proxy.on('proxyReq', (proxyReq, req) => {
+            console.log(`🚀 Proxy Request: ${req.method} ${req.url}`);
+          });
+          proxy.on('proxyRes', (proxyRes, req) => {
+            console.log(`✅ Proxy Response: ${req.method} ${req.url} - ${proxyRes.statusCode}`);
+          });
+        }
+      }
+    }
   },
 })

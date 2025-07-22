@@ -1,20 +1,15 @@
 // src/phaser/scenes/GameScene.ts
 import Phaser from 'phaser';
-import socket from '../../services/socket';
+import socketService from '../../services/socket';
 import Player from '../object/Player';
 
 interface GamePlayer {
   socketId: string;
   username: string;
-  isDancing: boolean;
   isAlive: boolean;
-  commitGauge: number;
+  playerMotion: string; // 'coding' | 'dancing' | 'bumpercar' | 'exercise' | 'coffee' | 'shotgun' | 'gaming'
   flowGauge: number;
-  commitCount: number;
   skill: string | null;
-  bumpercar: boolean;
-  isExercising: boolean;
-  hasCaffeine: boolean;
   muscleCount: number;
 }
 
@@ -26,31 +21,80 @@ interface GameState {
 
 export default class GameScene extends Phaser.Scene {
   private players: Map<string, Player> = new Map();
+  private deskMap: Map<number, Phaser.GameObjects.Sprite> = new Map();
   private localPlayerId: string = '';
   private gameState: GameState = { roomId: '', players: [], isManagerAppeared: false };
   private focusGaugeValue: number = 100;
   private focusBar!: Phaser.GameObjects.Rectangle;
   private focusBarBg!: Phaser.GameObjects.Rectangle;
-  private commitBar!: Phaser.GameObjects.Rectangle;
-  private commitBarBg!: Phaser.GameObjects.Rectangle;
   private playerPositions: { [key: string]: { x: number; y: number } } = {};
   private managerSprite!: Phaser.GameObjects.Sprite;
   private managerAppearTimeout: any = null;
   private isManagerAppearing: boolean = false;
   private bumpercarAudio: HTMLAudioElement | null = null;
+  private bgmAudio: HTMLAudioElement | null = null;
+  private SFX_MAP: Record<string, string[] | (() => string)> = {
+    bumpercar: [
+      '/src/assets/sound/bumpercar_sound1.mp3',
+      '/src/assets/sound/bumpercar_sound2.mp3',
+    ],
+    coffee: [
+      '/src/assets/sound/coffee_sound1.mp3',
+      '/src/assets/sound/coffee_sound2.mp3',
+    ],
+    exercise: [
+      '/src/assets/sound/exercise_sound1.mp3',
+    ],
+    shotgun: [
+      '/src/assets/sound/shotgun_sound1.mp3',
+      '/src/assets/sound/shotgun_sound2.mp3',
+    ],
+    game: [
+      '/src/assets/sound/game_sound1.mp3',
+      '/src/assets/sound/game_sound2.mp3',
+    ],
+    coding: [
+      '/src/assets/sound/coding_sound1.mp3',
+      '/src/assets/sound/coding_sound2.mp3',
+    ],
+  };
 
   // 이미지별 스케일 설정 (워터마크 제거 및 crop에 따른 조정)
   private readonly IMAGE_SCALES = {
     coding: 1.0,      // 코딩 애니메이션 크기
     exercise: 1.2,    // 운동 애니메이션 크기
     pkpk: 1.5,      // pkpk 애니메이션 크기
-    desk: 1.0,        // 책상 크기
-    chair: 0.5,       // 의자 크기
+    desk: 1.4,        // 책상 크기
+    chair: 0.4,       // 의자 크기
     player: 1.0,      // 플레이어 기본 크기
     'death-image': 0.7, // 사망 이미지 크기
-    door: 1.2,        // 문 이미지 크기
-    manager: 1.0      // 매니저 애니메이션 크기
+    door: 1.6,        // 문 이미지 크기
+    manager: 1.4,      // 매니저 애니메이션 크기
+    coffee: 1.0,       // 커피 애니메이션 크기
+    shotgun: 1.3,      // 샷건 애니메이션 크기
   };
+
+  private DANCE_BGM_MAP: Record<string, string[]> = {
+    pkpk: [
+      '/src/assets/sound/pkpk.mp3',
+    ],
+    // 추후 danceType별로 추가
+  };
+  private currentDanceAudio: HTMLAudioElement | null = null;
+  private BGM_VOLUME = 0.5;
+  private SFX_VOLUME = 1.0;
+  private DANCE_BGM_VOLUME = 1.0;
+  private SOUND_SCALES: Record<string, number> = {
+    bgm: 0.5,
+    bumpercar: 1.0,
+    coffee: 0.8,
+    exercise: 1.0,
+    shotgun: 0.8,
+    game: 1.0,
+    default: 1.0,
+    pkpk: 0.5, // 예시: pkpk.mp3
+  };
+  private danceAudioArr: { danceType: string; audio: HTMLAudioElement }[] = [];
 
   constructor() {
     super('GameScene');
@@ -70,9 +114,12 @@ export default class GameScene extends Phaser.Scene {
   preload() {
     this.load.image('background', '/src/assets/img/game_background.jpg');
     this.load.image('chair', '/src/assets/img/chair.png');
-    this.load.image('desk', '/src/assets/img/desk.png');
     
     // 스프라이트시트 로드 (프레임 크기 조정)
+    this.load.spritesheet('desk', '/src/assets/img/desk.png', {
+      frameWidth: 1148/4,
+      frameHeight: 217,
+    });
     this.load.spritesheet('coding', '/src/assets/img/coding.png', {
       frameWidth: 809/3,
       frameHeight: 307,
@@ -93,12 +140,31 @@ export default class GameScene extends Phaser.Scene {
       frameWidth: 877/4,
       frameHeight: 284,
     });
+    this.load.spritesheet('coffee', '/src/assets/img/coffee.png', {
+      frameWidth: 736/4,
+      frameHeight: 262,
+    });
+    this.load.spritesheet('shotgun', '/src/assets/img/shotgun.png', {
+      frameWidth: 1253/7,
+      frameHeight: 199,
+    });
 
     this.load.image('door', '/src/assets/img/door.png');
     this.load.image('death-image', '/src/assets/img/deathplayer.png');
   }
 
   create() {
+    // 모든 상태를 완전히 새로 초기화
+    this.players = new Map();
+    this.localPlayerId = '';
+    this.gameState = { roomId: '', players: [], isManagerAppeared: false };
+    this.focusGaugeValue = 100;
+    this.managerAppearTimeout = null;
+    this.isManagerAppearing = false;
+    this.bumpercarAudio = null;
+    this.playerPositions = {};
+    this.deskMap.clear(); // 초기화
+
     this.add.image(0, 0, 'background')
       .setOrigin(0, 0)
       .setDisplaySize(this.scale.width, this.scale.height);
@@ -125,7 +191,26 @@ export default class GameScene extends Phaser.Scene {
     this.setupManagerArea();
     
     // 게임 상태 요청
-    socket.emit('getGameState', {});
+    socketService.emit('getGameState', {});
+
+    // 키보드 소리 반복 재생
+    this.bgmAudio = new Audio('/src/assets/sound/coding_sound1.mp3');
+    this.bgmAudio.loop = true;
+    this.bgmAudio.volume = this.SOUND_SCALES['bgm'] ?? 0.5;
+    this.bgmAudio.play().catch(() => {}); // 자동재생 정책 대응
+  }
+
+  // destroy 시 배경음악 정지
+  shutdown() {
+    if (this.bgmAudio) {
+      this.bgmAudio.pause();
+      this.bgmAudio.currentTime = 0;
+      this.bgmAudio = null;
+    }
+  }
+  destroy() {
+    this.shutdown();
+    // super.destroy(); // Phaser.Scene에는 destroy() 없음
   }
 
   setupUI() {
@@ -136,24 +221,14 @@ export default class GameScene extends Phaser.Scene {
     
     const barWidth = 200 * uiScale * 1.5; // 게이지 바 크기 1.5배 확대
     const barHeight = 20 * uiScale * 1.5; // 게이지 바 높이 1.5배 확대
-    const commitBarHeight = 15 * uiScale * 1.5; // 커밋 게이지 높이 1.5배 확대
     const fontSize = Math.max(12, 14 * uiScale);
     
     // Flow Gauge
     this.focusBarBg = this.add.rectangle(20 * uiScale, 20 * uiScale, barWidth, barHeight, 0x222222).setOrigin(0, 0);
     this.focusBar = this.add.rectangle(20 * uiScale, 20 * uiScale, barWidth, barHeight, 0x00aaff).setOrigin(0, 0);
     
-    // Commit Gauge
-    this.commitBarBg = this.add.rectangle(20 * uiScale, 50 * uiScale, barWidth, commitBarHeight, 0x222222).setOrigin(0, 0);
-    this.commitBar = this.add.rectangle(20 * uiScale, 50 * uiScale, 0, commitBarHeight, 0x00ff00).setOrigin(0, 0);
-    
     // 게이지 라벨
     this.add.text((20 + barWidth + 10) * uiScale, (20 + barHeight/2) * uiScale, 'Flow', { 
-      fontSize: `${fontSize}px`, 
-      color: '#ffffff' 
-    });
-    
-    this.add.text((20 + barWidth + 10) * uiScale, (50 + commitBarHeight/2) * uiScale, 'Commit', { 
       fontSize: `${fontSize}px`, 
       color: '#ffffff' 
     });
@@ -201,71 +276,76 @@ export default class GameScene extends Phaser.Scene {
       frameRate: 12,
       repeat: -1
     });
+    this.anims.create({
+      key: 'coffee',
+      frames: this.anims.generateFrameNumbers('coffee', { start: 0, end: 3 }),
+      frameRate: 6,
+      repeat: 0 // 한 번만 재생
+    });
+    this.anims.create({
+      key: 'shotgun',
+      frames: this.anims.generateFrameNumbers('shotgun', { start: 0, end: 6 }),
+      frameRate: 12,
+      repeat: 0 // 한 번만 재생
+    });
   }
 
   setupSocketListeners() {
+    // 기존 리스너 모두 해제
+    socketService.off('gameStateUpdate');
+    socketService.off('playerJoined');
+    socketService.off('playerLeft');
+    socketService.off('playerAction');
+    socketService.off('setLocalPlayer');
+    socketService.off('playerDied');
+    socketService.off('commitSuccess');
+    socketService.off('pushStarted');
+    socketService.off('pushFailed');
+    socketService.off('managerAppeared');
+    socketService.off('skillEffect');
+    // 이후 새로 등록
+
     // 게임 상태 업데이트
-    socket.on('gameStateUpdate', (gameState: GameState) => {
+    socketService.on('gameStateUpdate', (gameState: GameState) => {
       console.log('GameState Update:', gameState);
       this.updateGameState(gameState);
     });
-
     // 플레이어 추가
-    socket.on('playerJoined', (playerData: GamePlayer) => {
+    socketService.on('playerJoined', (playerData: GamePlayer) => {
       console.log('Player joined game:', playerData);
       this.addPlayer(playerData);
     });
-
     // 플레이어 제거
-    socket.on('playerLeft', (playerData: { socketId: string }) => {
+    socketService.on('playerLeft', (playerData: { socketId: string }) => {
       console.log('Player left game:', playerData);
       this.removePlayer(playerData.socketId);
     });
-
     // 플레이어 액션
-    socket.on('playerAction', (data: { socketId: string; action: string; payload?: any }) => {
+    socketService.on('playerAction', (data: { socketId: string; action: string; payload?: any }) => {
       console.log('Player action:', data);
       this.handlePlayerAction(data);
     });
-
     // 로컬 플레이어 ID 설정
-    socket.on('setLocalPlayer', (playerId: string) => {
+    socketService.on('setLocalPlayer', (playerId: string) => {
       this.localPlayerId = playerId;
       console.log('Local player ID set:', playerId);
     });
-
     // === 백엔드 게임 이벤트 연동 ===
 
     // 플레이어 사망
-    socket.on('playerDied', (data: { socketId: string; reason: string }) => {
+    socketService.on('playerDied', (data: { socketId: string; reason: string }) => {
       console.log(`💀 Player died: ${data.socketId}, reason: ${data.reason}`);
       this.handlePlayerDeath(data.socketId, data.reason);
     });
 
     // 커밋 성공
-    socket.on('commitSuccess', (data: { socketId: string; commitCount: number }) => {
+    socketService.on('commitSuccess', (data: { socketId: string; commitCount: number }) => {
       console.log(`✅ Commit success: ${data.socketId}, count: ${data.commitCount}`);
       this.showCommitSuccess(data.socketId, data.commitCount);
     });
 
-    // Push 시작
-    socket.on('pushStarted', (data: { socketId: string }) => {
-      console.log(`🚀 Push started: ${data.socketId}`);
-    });
-
-    // Push 실패
-    socket.on('pushFailed', (data: { socketId: string }) => {
-      console.log(`❌ Push failed: ${data.socketId}`);
-      this.showPushFailed(data.socketId);
-    });
-
-    // 게임 종료
-    socket.on('gameEnded', (data: { winner: any }) => {
-      console.log('🏁 Game ended:', data.winner);
-      this.handleGameEnd(data.winner);
-    });
-
-    socket.on('managerAppeared', () => {
+    // 운영진 등장
+    socketService.on('managerAppeared', () => {
       if (this.managerAppearTimeout) {
         clearTimeout(this.managerAppearTimeout);
       }
@@ -277,57 +357,96 @@ export default class GameScene extends Phaser.Scene {
       }, 600);
     });
 
-    // 스킬 효과 처리
-    socket.on('skillEffect', (data: { type: string; socketId: string; duration?: number }) => {
-      // 1. bumpercar
-      if (data.type === 'bumpercar') {
-        const player = this.players.get(data.socketId);
-        if (player) {
-          player.bumpercar = true;
-          player.anims.play('bumpercar', true);
-          player.setScale(this.getImageScale('bumpercar'));
+    // 진짜 게임 시작 신호
+    socketService.on('startGameLoop', () => {
+      console.log('[DEBUG] GameScene.ts : startGameLoop');
+      if (this.bgmAudio) {
+        this.bgmAudio.currentTime = 0;
+        this.bgmAudio.volume = this.SOUND_SCALES['bgm'] ?? 0.5;
+        this.bgmAudio.play().catch(() => {});
+      }
+    });
+    // 게임 종료 시 모든 사운드 정지
+    socketService.on('gameEnded', () => {
+      console.log('[DEBUG] GameScene.ts : gameEnded - 모든 사운드 정지');
+      if (this.bgmAudio) {
+        this.bgmAudio.pause();
+        this.bgmAudio.currentTime = 0;
+      }
+      this.danceAudioArr.forEach(({ audio }) => {
+        audio.pause();
+        audio.currentTime = 0;
+      });
+      this.danceAudioArr = [];
+    });
+    // 스킬 SFX 재생 이벤트
+    socketService.on('playSkillSfx', (data: { type: string }) => {
+      console.log('[DEBUG] GameScene.ts : playSkillSfx : ', data.type);
+      const sfxList = this.SFX_MAP[data.type];
+      const volume = this.SOUND_SCALES[data.type] ?? 1.0;
+      if (sfxList) {
+        let sfxPath = '';
+        if (Array.isArray(sfxList)) {
+          // 랜덤 선택
+          sfxPath = sfxList[Math.floor(Math.random() * sfxList.length)];
+        } else if (typeof sfxList === 'function') {
+          sfxPath = sfxList();
         }
-        const soundIdx = Math.random() < 0.5 ? 1 : 2;
-        const audio = new Audio(`/src/assets/sound/bumpercar_sound${soundIdx}.mp3`);
-        audio.play();
-        this.bumpercarAudio = audio;
-      } else if (data.type === 'bumpercarEnd') {
-        const player = this.players.get(data.socketId);
-        if (player) {
-          player.bumpercar = false;
-          if (player.isAlive) {
-            player.anims.play('coding', true);
-            player.setScale(this.getImageScale('player'));
-          }
-        }
-        if (this.bumpercarAudio) {
-          this.bumpercarAudio.pause();
-          this.bumpercarAudio.currentTime = 0;
-          this.bumpercarAudio = null;
+        if (sfxPath) {
+          const audio = new Audio(sfxPath);
+          audio.volume = volume;
+          audio.play();
         }
       }
+    });
+
+    // 춤별 BGM 재생 (여러 명 동시 가능)
+    socketService.on('playDanceBgm', (data: { danceType: string }) => {
+      console.log('[DEBUG] GameScene.ts : playDanceBgm : ', data.danceType);
+      const bgmList = this.DANCE_BGM_MAP[data.danceType];
+      if (!bgmList || bgmList.length === 0) return;
+      const volume = this.SOUND_SCALES[data.danceType] ?? 1.0;
+      const bgmPath = bgmList[0];
+      const audio = new Audio(bgmPath);
+      audio.loop = true;
+      audio.volume = volume;
+      audio.play().catch(() => {});
+      this.danceAudioArr.push({ danceType: data.danceType, audio });
+    });
+    // 춤별 BGM 정지 (해당 danceType만 모두 정지)
+    socketService.on('stopDanceBgm', (data: { danceType: string }) => {
+      console.log('[DEBUG] GameScene.ts : stopDanceBgm : ', data.danceType);
+      this.danceAudioArr = this.danceAudioArr.filter(({ danceType, audio }) => {
+        if (danceType === data.danceType) {
+          audio.pause();
+          audio.currentTime = 0;
+          return false;
+        }
+        return true;
+      });
     });
   }
 
   setupInput() {
     // 춤추기 (스페이스바)
     this.input.keyboard?.on('keydown-SPACE', () => {
-      socket.emit('playerAction', { action: 'startDancing' });
+      socketService.emit('playerAction', { action: 'startDancing' });
     });
     this.input.keyboard?.on('keyup-SPACE', () => {
-      socket.emit('playerAction', { action: 'stopDancing' });
+      socketService.emit('playerAction', { action: 'stopDancing' });
     });
     // P키로 push
     this.input.keyboard?.on('keydown-P', () => {
-      socket.emit('playerAction', { action: 'push' });
+      socketService.emit('playerAction', { action: 'push' });
     });
     // Z키로 스킬 사용
     this.input.keyboard?.on('keydown-Z', () => {
-      socket.emit('skillUse', {});
+      console.log("[DEBUG] GameScene.ts : skill used!!");
+      socketService.emit('skillUse', {});
     });
   }
 
-  setupPlayerPositions() {
+  setupPlayerPositions() { // player 위치 설정
     // 화면 크기에 비례하여 플레이어 위치 설정
     const screenWidth = this.scale.width;
     const screenHeight = this.scale.height;
@@ -345,26 +464,29 @@ export default class GameScene extends Phaser.Scene {
     });
   }
 
-  setupAllDesksAndChairs() {
+  setupAllDesksAndChairs() { // 책상, 의자 설정
     // 모든 플레이어 위치에 desk와 chair 미리 배치
     Object.values(this.playerPositions).forEach((position) => {
       const screenWidth = this.scale.width;
       const screenHeight = this.scale.height;
       const scaleFactor = Math.min(screenWidth / 1200, screenHeight / 800);
-      
-      // Desk 배치 (가장 뒤) - 새로운 스케일 시스템 적용
-      this.add.image(position.x, position.y + 50 * scaleFactor, 'desk')
+      // 책상은 기존보다 위로 20px 이동
+      const deskY = position.y + 50 * scaleFactor - 20;
+      // 의자는 기존보다 아래로 20px 이동
+      const chairY = position.y + 120 * scaleFactor + 20;
+      // Desk 스프라이트 생성 (플레이어별)
+      const deskFrame = 3;
+      const deskSprite = this.add.sprite(position.x, deskY, 'desk', deskFrame)
         .setScale(this.getImageScale('desk'))
         .setDepth(1);
-      
-      // Chair 배치 (가장 앞) - 새로운 스케일 시스템 적용
-      this.add.image(position.x, position.y + 120 * scaleFactor, 'chair')
+      // Chair 배치
+      this.add.image(position.x, chairY, 'chair')
         .setScale(this.getImageScale('chair'))
         .setDepth(3);
     });
   }
 
-  setupManagerArea() {
+  setupManagerArea() { // 운영진 위치 설정
     // 매니저 위치 설정 (화면 3/4 정도)
     const screenWidth = this.scale.width;
     const screenHeight = this.scale.height;
@@ -398,20 +520,16 @@ export default class GameScene extends Phaser.Scene {
       const oldFlowGauge = this.focusGaugeValue;
       this.focusGaugeValue = localPlayer.flowGauge || 100;
       this.focusBar.width = (this.focusGaugeValue / 100) * barWidth;
-      // 커밋 게이지 (Commit Gauge) 업데이트
-      const oldCommitGauge = this.commitBar.width;
-      const commitGaugePercent = (localPlayer.commitGauge / 100) * barWidth;
-      this.commitBar.width = commitGaugePercent;
       // 게이지 변경 로그 (디버깅용)
-      if (oldFlowGauge !== this.focusGaugeValue || oldCommitGauge !== this.commitBar.width) {
-        console.log(`📊 [${localPlayer.username}] Flow: ${oldFlowGauge} → ${this.focusGaugeValue}, Commit: ${Math.round(oldCommitGauge)} → ${Math.round(this.commitBar.width)}`);
+      if (oldFlowGauge !== this.focusGaugeValue) {
+        console.log(`📊 [${localPlayer.username}] Flow: ${oldFlowGauge} → ${this.focusGaugeValue}`);
       }
       // 모든 플레이어의 게이지 상태 로그 (디버깅용)
       console.log(`🎮 GameState received - Manager: ${gameState.isManagerAppeared}, Players: ${gameState.players.length}`);
       gameState.players.forEach(p => {
-        console.log(`  👤 [${p.username}] Flow: ${p.flowGauge}, Commit: ${p.commitGauge}, Dancing: ${p.isDancing}, Alive: ${p.isAlive}`);
+        console.log(`  👤 [${p.username}] Flow: ${p.flowGauge}`);
       });
-      console.log(`📊 Bar widths - Flow: ${this.focusBar.width}, Commit: ${this.commitBar.width}`);
+      console.log(`📊 Bar widths - Flow: ${this.focusBar.width}`);
     }
     // 플레이어들 업데이트
     gameState.players.forEach(playerData => {
@@ -435,31 +553,21 @@ export default class GameScene extends Phaser.Scene {
     const playerIndex = Array.from(this.players.keys()).length;
     const positions = Object.values(this.playerPositions);
     const position = playerIndex < positions.length ? positions[playerIndex] : { x: 400, y: 300 };
-    
-    // Player 배치 (중간) - 새로운 스케일 시스템 적용
+    // deskSprite는 이미 자리별로 생성되어 있으므로 따로 생성하지 않음
+
+    // Player 배치 (중간)
     const player = new Player(
-      this, 
-      position.x, 
-      position.y, 
-      'coding', 
-      parseInt(playerData.socketId.slice(-4), 16), // 간단한 ID 생성
+      this,
+      position.x,
+      position.y,
+      'coding',
+      parseInt(playerData.socketId.slice(-4), 16),
       playerData.username
     );
-    
     player.setScale(this.getImageScale('player')).setDepth(2);
-
-    player.isDancing = playerData.isDancing;
     player.isAlive = playerData.isAlive;
-    
-    // 사망 상태면 death 이미지, 생존 상태면 코딩 애니메이션
-    if (playerData.isAlive) {
-      player.anims.play('coding', true);
-    } else {
-      player.setTexture('death-image');
-      player.setScale(this.getImageScale('death-image'));
-      player.anims.stop();
-    }
-
+    player.playerMotion = playerData.playerMotion;
+    this.applyPlayerMotion(player, playerData.playerMotion);
     // 텍스트도 반응형으로
     const screenWidth = this.scale.width;
     const screenHeight = this.scale.height;
@@ -472,66 +580,91 @@ export default class GameScene extends Phaser.Scene {
       padding: { x: 5 * scaleFactor, y: 2 * scaleFactor }
     }).setOrigin(0.5);
 
-    const commitText = this.add.text(position.x, position.y - 130 * scaleFactor, `Commit: ${playerData.commitCount}`, {
-      fontSize: `${Math.max(10, 12 * scaleFactor)}px`,
-      color: '#00ff00',
-      backgroundColor: '#000000',
-      padding: { x: 5 * scaleFactor, y: 2 * scaleFactor }
-    }).setOrigin(0.5);
-
     player.setData('nameText', nameText);
-    player.setData('commitText', commitText);
     this.players.set(playerData.socketId, player);
   }
 
   updatePlayer(playerData: GamePlayer) {
     const player = this.players.get(playerData.socketId);
-    if (!player) return;
-
-    const commitText = player.getData('commitText') as Phaser.GameObjects.Text;
-    if (commitText) {
-      commitText.setText(`Commit: ${playerData.commitCount}`);
-    }
-
+    if (!player || !player.scene || !player.texture || typeof player.setTexture !== 'function') return;
+    // 죽은 플레이어는 무조건 death-image
     if (!playerData.isAlive) {
       if (player.isAlive) {
         player.isAlive = false;
-        player.setTexture('death-image');
-        player.setScale(this.getImageScale('death-image'));
-        console.log(`💀 Player ${playerData.username} died`);
+        this.applyPlayerMotion(player, 'dead');
       }
       player.anims.stop();
       return;
     } else if (playerData.isAlive && !player.isAlive) {
       player.isAlive = true;
-      player.setTexture('coding');
-      player.setScale(this.getImageScale('player'));
-      console.log(`🔄 Player ${playerData.username} revived`);
+      this.applyPlayerMotion(player, playerData.playerMotion);
     }
-
-    if (playerData.isAlive) {
-      // Exercise 애니메이션 중일 때는 덮어쓰지 않음 (3초간 보호)
-      const isExerciseAnimation = player.anims.currentAnim?.key === 'exercise';
-      
-      if (playerData.isDancing && !player.isDancing) {
-        player.isDancing = true;
-        if (!isExerciseAnimation && player.anims.currentAnim?.key !== 'dance') {
-          player.anims.play('dance', true);
-        }
-        if (!isExerciseAnimation) {
-          player.setScale(this.getImageScale('pkpk'));
-        }
-        console.log(`💃 Player ${playerData.username} started dancing`);
-      } else if (!playerData.isDancing && player.isDancing) {
-        player.isDancing = false;
-        if (!isExerciseAnimation && player.anims.currentAnim?.key !== 'coding') {
-          player.anims.play('coding', true);
-        }
-        if (!isExerciseAnimation) {
-          player.setScale(this.getImageScale('player'));
-        }
-        console.log(`🛑 Player ${playerData.username} stopped dancing`);
+    // 살아있는 경우에만 playerMotion 변화 감지
+    if (player.playerMotion !== playerData.playerMotion) {
+      this.applyPlayerMotion(player, playerData.playerMotion);
+      player.playerMotion = playerData.playerMotion;
+    }
+    // 자리 인덱스 계산
+    const playerIndex = Array.from(this.players.keys()).indexOf(playerData.socketId);
+    const deskSprite = this.deskMap.get(playerIndex);
+    if (deskSprite) {
+      let deskFrame = 3;
+      if (playerData.playerMotion === 'gaming') {
+        deskFrame = Math.floor(Math.random() * 3);
       }
+      deskSprite.setFrame(deskFrame);
+    }
+  }
+
+  applyPlayerMotion(player: Player, motion: string) {
+    if (!player.isAlive && motion !== 'dead') {
+      // 죽은 상태면 무조건 death-image
+      player.setTexture('death-image');
+      player.setScale(this.getImageScale('death-image'));
+      player.anims.stop();
+      return;
+    }
+    switch (motion) {
+      case 'dancing':
+        player.anims.play('dance', true);
+        player.setScale(this.getImageScale('pkpk'));
+        break;
+      case 'bumpercar':
+        player.anims.play('bumpercar', true);
+        player.setScale(this.getImageScale('bumpercar'));
+        break;
+      case 'exercise':
+        player.anims.play('exercise', true);
+        player.setScale(this.getImageScale('exercise'));
+        break;
+      case 'coffee':
+        player.anims.play('coffee', true);
+        player.setScale(this.getImageScale('coffee'));
+        player.once('animationcomplete-coffee', () => {
+          socketService.emit('animationComplete', { type: 'coffee' });
+        });
+        break;
+      case 'shotgun':
+        player.anims.play('shotgun', true);
+        player.setScale(this.getImageScale('shotgun'));
+        player.once('animationcomplete-shotgun', () => {
+          socketService.emit('animationComplete', { type: 'shotgun' });
+        });
+        break;
+      case 'gaming':
+        player.anims.play('coding', true);
+        player.setScale(this.getImageScale('player'));
+        break;
+      case 'coding':
+      default:
+        player.anims.play('coding', true);
+        player.setScale(this.getImageScale('player'));
+        break;
+      case 'dead':
+        player.setTexture('death-image');
+        player.setScale(this.getImageScale('death-image'));
+        player.anims.stop();
+        break;
     }
   }
 
@@ -542,11 +675,7 @@ export default class GameScene extends Phaser.Scene {
       if (nameText) {
         nameText.destroy();
       }
-
-      const commitText = player.getData('commitText') as Phaser.GameObjects.Text;
-      if (commitText) {
-        commitText.destroy();
-      }
+      // deskSprite는 이미 자리별로 생성되어 있으므로 따로 삭제하지 않음
       
       player.destroy();
       this.players.delete(socketId);
@@ -563,18 +692,10 @@ export default class GameScene extends Phaser.Scene {
 
     switch (data.action) {
       case 'startDancing':
-        player.isDancing = true;
-        if (player.anims.currentAnim?.key !== 'dance') {
-          player.anims.play('dance', true);
-        }
-        player.setScale(this.getImageScale('pkpk'));
+        player.playerMotion = 'dancing';
         break;
       case 'stopDancing':
-        player.isDancing = false;
-        if (player.anims.currentAnim?.key !== 'coding') {
-          player.anims.play('coding', true);
-        }
-        player.setScale(this.getImageScale('player'));
+        player.playerMotion = 'coding';
         break;
       case 'push':
         console.log('Push action received');
@@ -588,8 +709,11 @@ export default class GameScene extends Phaser.Scene {
       console.log('🎭 Changing door to manager animation...');
       this.managerSprite.setTexture('manager');
       this.managerSprite.setScale(this.getImageScale('manager'));
-      this.managerSprite.play('manager');
-      
+      this.managerSprite.play({ key: 'manager', repeat: 0 }); // 반복 없이
+      // 애니메이션 끝나면 마지막 프레임에서 멈춤
+      this.managerSprite.on('animationcomplete-manager', () => {
+        this.managerSprite.setFrame(5); // 마지막 프레임(0~5)
+      }, this);
       console.log('🚨 Manager appeared and started animation!');
     } else {
       console.log('❌ Manager sprite not found!');
@@ -673,13 +797,15 @@ export default class GameScene extends Phaser.Scene {
     const localPlayer = this.players.get(this.localPlayerId);
     if (localPlayer) {
       // Exercise 애니메이션을 강제로 재생하고 3초간 유지
+      localPlayer.playerMotion = 'exercise';
       localPlayer.anims.play('exercise', true);
       localPlayer.setScale(this.getImageScale('exercise'));
       console.log('🏃 Exercise animation started');
       
       // 3초 후에 원래 상태로 복귀 (단, 춤추고 있지 않을 때만)
       this.time.delayedCall(3000, () => {
-        if (localPlayer && !localPlayer.isDancing) {
+        if (localPlayer && localPlayer.playerMotion !== 'dancing') {
+          localPlayer.playerMotion = 'coding';
           localPlayer.anims.play('coding', true);
           localPlayer.setScale(this.getImageScale('player'));
           console.log('🏃 Exercise animation ended, back to coding');
@@ -688,21 +814,4 @@ export default class GameScene extends Phaser.Scene {
     }
   }
 
-  handleGameEnd(winner: any) {
-    const gameEndText = this.add.text(
-      this.scale.width / 2, 
-      this.scale.height / 2, 
-      winner ? `🏆 Winner: ${winner.username}!` : '🏁 Game Over - No Winner',
-      {
-        fontSize: '32px',
-        color: '#ffffff',
-        backgroundColor: '#000000',
-        padding: { x: 20, y: 10 }
-      }
-    ).setOrigin(0.5);
-
-    this.time.delayedCall(5000, () => {
-      window.location.href = '/';
-    });
-  }
 }

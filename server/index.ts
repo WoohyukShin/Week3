@@ -12,36 +12,30 @@ import initializeSocketHandlers from './handlers/sockethandlers';
 // 모델들을 명시적으로 import하여 스키마 등록
 import './db/models/User';
 
-const app = express();
-const server = http.createServer(app);
-
-console.log('🚀 Starting server initialization...');
-
-// 환경에 따라 CORS 옵션 분기
-const isProduction = process.env.NODE_ENV === 'production';
-const allowedOrigins = isProduction
-  ? [
-      'http://143.248.184.29:5173',
-      'https://143.248.184.29:5173',
-      'http://localhost:5173',
-      'https://week3client-production.up.railway.app',
-      // 실제 프론트 배포 도메인 추가
-    ]
-  : true;
+const allowedOrigins = [
+  'http://143.248.184.25:5173',
+  'http://172.29.80.1:5173',
+  'http://143.248.184.25:5174',
+  'http://172.29.80.1:5174',
+  'http://localhost:5175',
+  'http://127.0.0.1:5175',
+  'http://143.248.184.25:5175',
+  'http://192.168.35.3:5175',
+  'https://week3client-production.up.railway.app', // 살려주세요
+];
 
 const corsOptions = {
-  origin: allowedOrigins,
+  origin: '*',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
-  optionsSuccessStatus: 200
+  optionsSuccessStatus: 200,
 };
 
-const io = new Server(server, {
-  cors: corsOptions
-});
+const app = express();
 
-console.log('🔧 CORS and Socket.IO configured');
+app.use(cors(corsOptions));
+const server = http.createServer(app);
+const io = new Server(server, {cors: corsOptions});
 
 // 데이터베이스 연결
 const startServer = async () => {
@@ -56,22 +50,6 @@ const startServer = async () => {
     
     console.log('🔧 Setting up middleware...');
     
-    // CORS 헤더를 직접 추가하는 미들웨어 (가장 먼저 선언)
-    app.use((req, res, next) => {
-      const origin = req.headers.origin;
-      if (origin) {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-        res.setHeader('Vary', 'Origin');
-        res.setHeader('Access-Control-Allow-Credentials', 'true');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
-      }
-      if (req.method === 'OPTIONS') {
-        return res.sendStatus(204);
-      }
-      next();
-    });
-    
     // HTTP 요청 로그 미들웨어
     app.use((req, res, next) => {
       console.log(`📡 HTTP ${req.method} ${req.url} - ${new Date().toISOString()}`);
@@ -82,46 +60,15 @@ const startServer = async () => {
       next();
     });
     
-    // 상세 HTTP 요청/응답 로깅 미들웨어 (개발/디버깅용)
-    app.use(async (req, res, next) => {
-      console.log('======== HEADER ========');
-      console.log(req.method, req.url);
-      console.log(req.headers);
-      console.log('========= BODY =========');
-      if (req.body && Object.keys(req.body).length > 0) {
-        console.log(req.body);
-      } else {
-        console.log('(empty)');
-      }
-      // 응답 로깅을 위해 res.send를 감싼다
-      const oldSend = res.send;
-      res.send = function (body) {
-        console.log('======= RESPONSE =======');
-        // 응답 헤더
-        console.log(res.getHeaders());
-        // 응답 바디
-        try {
-          const parsed = typeof body === 'string' ? JSON.parse(body) : body;
-          console.log(parsed);
-        } catch {
-          console.log(body);
-        }
-        console.log('========================');
-        // 원래 send 호출
-        return oldSend.call(this, body);
-      };
-      next();
-    });
-    
     // JSON 파싱 미들웨어
     app.use(express.json());
     
     // 라우터 설정
-    app.use('/api/users', userRouter);
+    app.use('/api/users', cors(corsOptions), userRouter);
     console.log('✅ Middleware configured');
 
     // 헬스체크 엔드포인트
-    app.get('/health', (req, res) => {
+    app.get('/health', cors(corsOptions), (req, res) => {
       try {
         console.log('🏥 Health check requested');
         res.status(200).json({ 
@@ -157,7 +104,7 @@ initializeSocketHandlers(io);
     console.log('✅ Socket.IO handlers configured');
 
 // 서버 시작
-    const PORT = Number(serverConfig.port) || 3001;
+    const PORT = Number(process.env.PORT) || Number(serverConfig.port) || 3001;
     console.log(`🌐 Starting server on port ${PORT}...`);
     
     server.listen(PORT, '0.0.0.0', () => {
